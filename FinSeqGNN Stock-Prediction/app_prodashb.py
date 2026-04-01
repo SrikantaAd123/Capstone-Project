@@ -1,5 +1,5 @@
 import streamlit as st
-import yfinance as yf
+import yfinance as 
 import pandas as pd
 import torch
 import numpy as np
