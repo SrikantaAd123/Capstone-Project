@@ -1,6 +1,6 @@
 # 📈 Stock Price Prediction using FINseqGNN
 
-## 🚀 Overview
+##  Overview
 This project presents a multimodal deep learning framework that combines:
 - Numerical stock price data
 - Financial tweet sentiment
@@ -10,7 +10,7 @@ to predict stock price z-scores and market trends.
 
 ---
 
-## 🧠 Features
+##  Features
 - Z-score normalization (ACL-2018 standard)
 - 8-day temporal modeling
 - Sentiment integration (FLAIR)
@@ -20,7 +20,7 @@ to predict stock price z-scores and market trends.
 
 ---
 
-## 📊 Models Implemented
+## Models Implemented
 - LSTM
 - ALSTM
 - GCN
