@@ -30,13 +30,7 @@ to predict stock price z-scores and market trends.
 
 ---
 
-## 🧪 Results
-| Model | MSE | MAE | MRR |
-|------|-----|-----|-----|
-| LSTM | High | High | Low |
-| ALSTM | ↓ | ↓ | ↑ |
-| GAT | ↓ | ↓ | ↑ |
-| FINseqGNN | Lowest | Lowest | Highest |
+
 
 ---
 
