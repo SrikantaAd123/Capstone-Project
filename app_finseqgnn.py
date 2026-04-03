@@ -1,12 +1,11 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-st.title("📊 Real Time Stock Dashboard (With Z-Score)")
+st.title("📊 Real Time Stock Dashboard (DeepCharts Style)")
 
 # ==============================
 # SAFE VALUE
@@ -17,10 +16,9 @@ def safe(val):
     return float(val)
 
 # ==============================
-# FETCH DATA
+# FETCH DATA (ROBUST)
 # ==============================
 def fetch(ticker, period):
-
     df = yf.download(ticker, period=period, interval="1d", progress=False)
 
     if df.empty:
@@ -50,7 +48,7 @@ def add_indicators(df):
     return df
 
 # ==============================
-# Z-SCORE CALCULATION
+# Z-SCORE
 # ==============================
 def compute_zscore(df):
     df = df.copy()
@@ -58,7 +56,7 @@ def compute_zscore(df):
     return df.dropna()
 
 # ==============================
-# TREND LOGIC
+# TREND
 # ==============================
 def get_trend(df):
     if df['Close'].iloc[-1] > df['Close'].iloc[-5]:
@@ -67,7 +65,7 @@ def get_trend(df):
         return "📉 DOWNTREND"
 
 # ==============================
-# SIDEBAR
+# SIDEBAR INPUTS
 # ==============================
 st.sidebar.header("Chart Parameters")
 
@@ -120,15 +118,11 @@ if run:
     trend = get_trend(df)
 
     # ==============================
-    # Z-SCORE METRIC
+    # Z-SCORE
     # ==============================
     zdf = compute_zscore(df)
 
-    if len(zdf) > 0:
-        z_val = float(zdf['Z'].iloc[-1])
-    else:
-        z_val = 0
-
+    z_val = float(zdf['Z'].iloc[-1]) if len(zdf) > 0 else 0
     z_trend = "📈 Bullish" if z_val > 0 else "📉 Bearish"
 
     # ==============================
@@ -145,7 +139,7 @@ if run:
     st.subheader(trend)
 
     # ==============================
-    # MAIN CHART
+    # CHART
     # ==============================
     fig = go.Figure()
 
@@ -167,7 +161,6 @@ if run:
             line=dict(color='cyan', width=2)
         ))
 
-    # Indicators
     if "SMA20" in indicators:
         fig.add_trace(go.Scatter(
             x=df['Date'],
@@ -193,45 +186,59 @@ if run:
     st.plotly_chart(fig, use_container_width=True)
 
     # ==============================
-    # Z-SCORE TREND GRAPH
+    # Z-SCORE GRAPH
     # ==============================
     st.subheader("Z-Score Trend")
 
     if len(zdf) > 0:
-
         fig_z = go.Figure()
 
         fig_z.add_trace(go.Scatter(
             x=zdf['Date'],
             y=zdf['Z'],
-            line=dict(color='orange', width=2),
-            name="Z-score"
+            line=dict(color='orange', width=2)
         ))
 
         fig_z.update_layout(
             template="plotly_dark",
-            height=300,
-            yaxis=dict(title="Z-score"),
-            margin=dict(l=10,r=10,t=30,b=10)
+            height=300
         )
 
         st.plotly_chart(fig_z, use_container_width=True)
 
-    else:
-        st.info("Not enough data for Z-score")
-
 # ==============================
-# LIVE PRICES
+# FAST SIDEBAR (FIXED)
 # ==============================
-st.sidebar.subheader("Real-Time Stock Prices")
+st.sidebar.subheader("📊 Real-Time Prices")
 
-for s in ["AAPL","GOOG","AMZN"]:
+@st.cache_data(ttl=60)
+def get_price(ticker):
     try:
-        d = yf.download(s, period="1d", interval="1m", progress=False)
+        df = yf.download(ticker, period="1d", interval="5m", progress=False)
 
-        if not d.empty:
-            p = float(d['Close'].iloc[-1])
-            st.sidebar.metric(s, f"{p:.2f} USD")
+        if not df.empty:
+            price = float(df['Close'].iloc[-1])
+            prev = float(df['Close'].iloc[-2]) if len(df) > 1 else price
+
+            change = price - prev
+            pct = (change / prev) * 100 if prev != 0 else 0
+
+            return price, change, pct
 
     except:
-        st.sidebar.write(f"{s}: Loading...")
+        return None, None, None
+
+    return None, None, None
+
+
+for s in ["AAPL","GOOG","AMZN"]:
+    price, change, pct = get_price(s)
+
+    if price is not None:
+        st.sidebar.metric(
+            s,
+            f"{price:.2f} USD",
+            f"{change:+.2f} ({pct:.2f}%)"
+        )
+    else:
+        st.sidebar.metric(s, "Loading...", "")
