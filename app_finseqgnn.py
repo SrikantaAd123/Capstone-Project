@@ -1,36 +1,61 @@
 import streamlit as st
-import plotly.graph_objects as go
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
+import plotly.graph_objects as go
 
-##########################################################
-# PART 1: DATA FETCH + PREPROCESSING
-##########################################################
+# ==============================
+# PAGE CONFIG (DARK DASHBOARD)
+# ==============================
+st.set_page_config(page_title="FINseqGNN Dashboard", layout="wide")
 
-def fetch_data(ticker, period="6mo"):
+st.markdown("""
+    <style>
+    body {background-color: #0e1117; color: white;}
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("📊 Real-Time FINseqGNN Stock Prediction Dashboard")
+
+# ==============================
+# SIDEBAR CONTROLS
+# ==============================
+st.sidebar.header("⚙️ Chart Parameters")
+
+ticker = st.sidebar.selectbox("Ticker", ["AAPL", "GOOG", "ABBV", "AMZN"])
+period = st.sidebar.selectbox("Time Period", ["1mo","3mo","6mo","1y"])
+chart_type = st.sidebar.selectbox("Chart Type", ["Candlestick", "Line"])
+
+run = st.sidebar.button("🔮 Run Prediction")
+
+# ==============================
+# DATA FETCH
+# ==============================
+@st.cache_data
+def load_data(ticker, period):
     df = yf.download(ticker, period=period)
-    df = df[['Open','High','Low','Close','Volume']]
-    return df
+    return df[['Open','High','Low','Close','Volume']]
 
-def zscore_normalize(df):
+# ==============================
+# PREPROCESSING
+# ==============================
+def normalize(df):
     for col in df.columns:
         df[col] = (df[col] - df[col].rolling(60).mean()) / df[col].rolling(60).std()
     return df.dropna()
 
 def create_sequences(df, seq_len=8):
     X = []
-    for i in range(len(df) - seq_len):
+    for i in range(len(df)-seq_len):
         X.append(df.iloc[i:i+seq_len].values)
     return np.array(X)
 
-##########################################################
-# PART 2: MODEL
-##########################################################
-
-class PriceLSTM(nn.Module):
+# ==============================
+# MODEL (YOUR LSTM BASE)
+# ==============================
+class LSTMModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.lstm = nn.LSTM(5, 64, batch_first=True)
@@ -40,89 +65,81 @@ class PriceLSTM(nn.Module):
         _, (h, _) = self.lstm(x)
         return self.fc(h[-1]).squeeze()
 
-def predict_model(X):
-    model = PriceLSTM()
+def predict(X):
+    model = LSTMModel()
     model.eval()
-
-    if X.dim() != 3:
-        raise ValueError(f"LSTM expects 3D input, got {X.dim()}D")
-
     with torch.no_grad():
-        preds = model(X)
+        return model(X)
 
-    return preds
-
-##########################################################
-# PART 3: STREAMLIT UI
-##########################################################
-
-st.set_page_config(layout="wide")
-st.title(" FINseqGNN Stock Prediction Dashboard")
-
-st.sidebar.header("Parameters")
-ticker = st.sidebar.selectbox("Select Stock", ["AAPL", "GOOG", "ABBV"])
-period = st.sidebar.selectbox("Period", ["1mo", "3mo", "6mo", "1y"])
-
-##########################################################
+# ==============================
 # MAIN EXECUTION
-##########################################################
+# ==============================
+if run:
 
-if st.sidebar.button("Run Prediction"):
+    df = load_data(ticker, period)
 
-    try:
-        # Step 1: Fetch data
-        data = fetch_data(ticker, period)
+    # METRICS (REAL TIME)
+    latest = df.iloc[-1]
 
-        # Step 2: Normalize
-        data = zscore_normalize(data)
+    col1, col2, col3, col4 = st.columns(4)
 
-        # Step 3: Check data
-        if len(data) < 70:
-            st.error("Not enough data after normalization. Choose larger period.")
-            st.stop()
+    col1.metric("💰 Price", f"{latest['Close']:.2f} USD")
+    col2.metric("📈 High", f"{df['High'].max():.2f}")
+    col3.metric("📉 Low", f"{df['Low'].min():.2f}")
+    col4.metric("📊 Volume", f"{int(df['Volume'].iloc[-1]):,}")
 
-        # Step 4: Create sequences
-        X = create_sequences(data)
+    # ==============================
+    # CHART
+    # ==============================
+    fig = go.Figure()
 
-        if len(X) == 0:
-            st.error("Sequence creation failed. Not enough data.")
-            st.stop()
+    if chart_type == "Candlestick":
+        fig.add_trace(go.Candlestick(
+            x=df.index,
+            open=df['Open'],
+            high=df['High'],
+            low=df['Low'],
+            close=df['Close']
+        ))
+    else:
+        fig.add_trace(go.Scatter(x=df.index, y=df['Close']))
 
-        # Step 5: Convert to tensor
-        X_tensor = torch.tensor(X, dtype=torch.float32)
+    fig.update_layout(template="plotly_dark", height=500)
+    st.plotly_chart(fig, use_container_width=True)
 
-        # Step 6: Ensure 3D shape
-        if X_tensor.dim() == 2:
-            X_tensor = X_tensor.unsqueeze(0)
+    # ==============================
+    # MODEL PREDICTION
+    # ==============================
+    norm_df = normalize(df)
 
-        # Debug (optional)
-        st.write("Input Shape:", X_tensor.shape)
+    if len(norm_df) > 70:
+        X = create_sequences(norm_df)
 
-        # Step 7: Predict
-        preds = predict_model(X_tensor)
-        latest_pred = preds[-1].item()
+        if len(X) > 0:
+            X_tensor = torch.tensor(X, dtype=torch.float32)
 
-        # Step 8: Trend
-        trend = "📈 UPTREND" if latest_pred > 0 else "📉 DOWNTREND"
+            if X_tensor.dim() == 2:
+                X_tensor = X_tensor.unsqueeze(0)
 
-        ##########################################################
-        # OUTPUT UI
-        ##########################################################
+            preds = predict(X_tensor)
+            z = preds[-1].item()
 
-        col1, col2 = st.columns(2)
+            trend = "📈 UPTREND" if z > 0 else "📉 DOWNTREND"
 
-        with col1:
+            st.subheader("🔮 Model Prediction")
             st.metric("Predicted Trend", trend)
-            st.metric("Z-score Prediction", round(latest_pred, 4))
+            st.metric("Z-score", round(z, 4))
+        else:
+            st.warning("Not enough sequence data")
+    else:
+        st.warning("Not enough data for prediction")
 
-        with col2:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(y=data['Close'], name="Close Price"))
-            fig.update_layout(title=f"{ticker} Price Chart")
-            st.plotly_chart(fig)
+# ==============================
+# REAL TIME STOCK LIST
+# ==============================
+st.sidebar.subheader("📊 Live Stocks")
 
-        st.subheader("Recent Data")
-        st.dataframe(data.tail())
-
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
+for s in ["AAPL","GOOG","AMZN"]:
+    d = yf.download(s, period="1d")
+    price = d['Close'].iloc[-1]
+    st.sidebar.write(f"{s}: {price:.2f} USD")
