@@ -1,7 +1,3 @@
-# ==============================
-# FINAL FINseqGNN DASHBOARD (PRO VERSION)
-# ==============================
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -10,11 +6,14 @@ import torch
 import torch.nn as nn
 import plotly.graph_objects as go
 
+# ==============================
+# PAGE CONFIG
+# ==============================
 st.set_page_config(layout="wide")
-st.title("📊 Real-Time Stock Dashboard + Z-Score Prediction")
+st.title("📊 FINseqGNN Dashboard (Stock + ETF + Z-Score)")
 
 # ==============================
-# SAFE VALUE EXTRACTOR
+# SAFE VALUE
 # ==============================
 def safe(val):
     if isinstance(val, pd.Series):
@@ -24,12 +23,12 @@ def safe(val):
 # ==============================
 # DATA FETCH
 # ==============================
-def fetch_data(ticker, period="1y"):
+def fetch_data(ticker, period):
     df = yf.download(ticker, period=period, interval="1d", progress=False)
     return df[['Open','High','Low','Close','Volume']]
 
 # ==============================
-# Z-SCORE NORMALIZATION
+# Z-SCORE
 # ==============================
 def zscore(df):
     df = df.copy()
@@ -38,16 +37,16 @@ def zscore(df):
     return df.dropna()
 
 # ==============================
-# SEQUENCE CREATION
+# SEQUENCE
 # ==============================
 def create_seq(df, seq=8):
     X = []
-    for i in range(len(df)-seq):
+    for i in range(len(df) - seq):
         X.append(df.iloc[i:i+seq].values)
     return np.array(X)
 
 # ==============================
-# MODEL (IMPROVED)
+# MODEL
 # ==============================
 class Model(nn.Module):
     def __init__(self):
@@ -62,7 +61,7 @@ class Model(nn.Module):
 # ==============================
 # SIDEBAR
 # ==============================
-st.sidebar.header("⚙️ Parameters")
+st.sidebar.header("⚙️ Settings")
 
 ticker = st.sidebar.selectbox(
     "Select Asset",
@@ -75,11 +74,11 @@ period = st.sidebar.selectbox(
 )
 
 chart_type = st.sidebar.selectbox(
-    "Chart",
+    "Chart Type",
     ["Candlestick","Line"]
 )
 
-run = st.sidebar.button("🚀 Run")
+run = st.sidebar.button("🚀 Run Analysis")
 
 # ==============================
 # MAIN
@@ -92,10 +91,13 @@ if run:
         st.error("No data found")
         st.stop()
 
-    df.reset_index(inplace=True)
+    df = df.reset_index()
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values('Date')
+    df = df.dropna()
 
     # ==============================
-    # METRICS (SAFE)
+    # METRICS
     # ==============================
     price = safe(df['Close'].iloc[-1])
     high = safe(df['High'].max())
@@ -109,32 +111,43 @@ if run:
     c4.metric("Volume", f"{volume:,}")
 
     # ==============================
-    # CHART
+    # MAIN CHART (FIXED)
     # ==============================
     fig = go.Figure()
 
     if chart_type == "Candlestick":
         fig.add_trace(go.Candlestick(
             x=df['Date'],
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close']
+            open=df['Open'].astype(float),
+            high=df['High'].astype(float),
+            low=df['Low'].astype(float),
+            close=df['Close'].astype(float),
+            increasing_line_color='green',
+            decreasing_line_color='red'
         ))
     else:
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['Close']))
+        fig.add_trace(go.Scatter(
+            x=df['Date'],
+            y=df['Close'].astype(float),
+            mode='lines',
+            line=dict(color='cyan', width=2)
+        ))
 
-    fig.update_layout(template="plotly_dark", height=500)
+    fig.update_layout(
+        template="plotly_dark",
+        height=500,
+        margin=dict(l=10, r=10, t=30, b=10)
+    )
+
     st.plotly_chart(fig, use_container_width=True)
 
     # ==============================
-    # Z-SCORE + PREDICTION
+    # Z-SCORE PREDICTION
     # ==============================
     st.subheader("🔮 Z-Score Prediction")
 
     norm_df = zscore(df[['Open','High','Low','Close','Volume']])
 
-    # FIX: ensure enough data
     if len(norm_df) >= 80:
 
         X = create_seq(norm_df)
@@ -143,7 +156,6 @@ if run:
 
             X_tensor = torch.tensor(X, dtype=torch.float32)
 
-            # FIX SHAPE (IMPORTANT)
             if X_tensor.dim() != 3:
                 X_tensor = X_tensor.view(-1, 8, 5)
 
@@ -157,15 +169,59 @@ if run:
 
             trend = "📈 UPTREND" if z_val > 0 else "📉 DOWNTREND"
 
-            cc1,cc2 = st.columns(2)
-            cc1.metric("Z-score", f"{z_val:.4f}")
-            cc2.metric("Trend", trend)
+            c1,c2 = st.columns(2)
+            c1.metric("Z-score", f"{z_val:.4f}")
+            c2.metric("Trend", trend)
+
+            # ==============================
+            # Z-SCORE GRAPH (FIXED)
+            # ==============================
+            fig_z = go.Figure()
+
+            fig_z.add_trace(go.Scatter(
+                x=df['Date'].iloc[-len(norm_df):],
+                y=norm_df['Close'],
+                mode='lines',
+                line=dict(color='orange', width=2)
+            ))
+
+            fig_z.update_layout(
+                template="plotly_dark",
+                height=300,
+                title="Z-score Trend"
+            )
+
+            st.plotly_chart(fig_z, use_container_width=True)
 
         else:
             st.warning("Sequence creation failed")
 
     else:
-        st.warning("Need more data (increase period)")
+        st.warning("Need more data for Z-score")
+
+    # ==============================
+    # ETF STYLE CHART
+    # ==============================
+    if ticker in ["GLD","SLV"]:
+
+        st.subheader("📉 ETF Style Chart")
+
+        fig_etf = go.Figure()
+
+        fig_etf.add_trace(go.Scatter(
+            x=df['Date'],
+            y=df['Close'].astype(float),
+            fill='tozeroy',
+            line=dict(color='red', width=2)
+        ))
+
+        fig_etf.update_layout(
+            template="plotly_dark",
+            height=350,
+            showlegend=False
+        )
+
+        st.plotly_chart(fig_etf, use_container_width=True)
 
     # ==============================
     # TABLE
@@ -174,7 +230,7 @@ if run:
     st.dataframe(df.tail())
 
 # ==============================
-# LIVE MARKET (FIXED)
+# LIVE MARKET
 # ==============================
 st.sidebar.subheader("📊 Live Market")
 
