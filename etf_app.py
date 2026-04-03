@@ -4,14 +4,24 @@ import numpy as np
 import torch
 import plotly.graph_objects as go
 
-##########################################################
-# FUNCTIONS
-##########################################################
+st.set_page_config(layout="wide")
+st.title("📈 ETF Prediction Dashboard (Gold & Silver)")
 
-def fetch_data(ticker):
-    df = yf.download(ticker, period="6mo")
-    return df[['Open','High','Low','Close','Volume']]
+ticker = st.selectbox("Select ETF", ["GLD", "SLV"])
 
+df = yf.download(ticker, period="6mo")
+
+st.metric("Current Price", f"{df['Close'].iloc[-1]:.2f}")
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy'))
+fig.update_layout(template="plotly_dark")
+
+st.plotly_chart(fig, use_container_width=True)
+
+# ==============================
+# SIMPLE MODEL
+# ==============================
 def normalize(df):
     for col in df.columns:
         df[col] = (df[col] - df[col].rolling(60).mean()) / df[col].rolling(60).std()
@@ -23,46 +33,32 @@ def sequences(df):
         X.append(df.iloc[i:i+8].values)
     return np.array(X)
 
-##########################################################
-# MODEL
-##########################################################
+norm = normalize(df[['Open','High','Low','Close','Volume']])
 
-class Model(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lstm = torch.nn.LSTM(5, 32, batch_first=True)
-        self.fc = torch.nn.Linear(32, 1)
+if len(norm) > 70:
+    X = sequences(norm)
 
-    def forward(self, x):
-        _, (h, _) = self.lstm(x)
-        return self.fc(h[-1]).squeeze()
+    if len(X) > 0:
+        X_tensor = torch.tensor(X, dtype=torch.float32)
 
-##########################################################
-# APP
-##########################################################
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(5, 32, batch_first=True)
+                self.fc = torch.nn.Linear(32,1)
 
-st.title("📈 ETF Prediction (GLD / SLV)")
+            def forward(self,x):
+                _,(h,_) = self.lstm(x)
+                return self.fc(h[-1])
 
-ticker = st.selectbox("Select ETF", ["GLD", "SLV"])
+        model = Model()
+        model.eval()
 
-data = fetch_data(ticker)
-data = normalize(data)
+        with torch.no_grad():
+            pred = model(X_tensor)
 
-X = sequences(data)
-X_tensor = torch.tensor(X).float()
+        z = pred[-1].item()
+        trend = "UP" if z > 0 else "DOWN"
 
-model = Model()
-model.eval()
-
-with torch.no_grad():
-    pred = model(X_tensor)
-
-latest = pred[-1].item()
-trend = "📈 UP" if latest > 0 else "📉 DOWN"
-
-st.metric("Trend", trend)
-st.metric("Z-score", round(latest,4))
-
-fig = go.Figure()
-fig.add_trace(go.Scatter(y=data['Close']))
-st.plotly_chart(fig)
+        st.metric("Predicted Trend", trend)
+        st.metric("Z-score", round(z,4))
