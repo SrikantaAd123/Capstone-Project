@@ -1,64 +1,110 @@
 import streamlit as st
 import yfinance as yf
-import numpy as np
-import torch
+import pandas as pd
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("📈 ETF Prediction Dashboard (Gold & Silver)")
 
+st.title("📊 ETF Dashboard (Gold & Silver)")
+
+# ==============================
+# SELECT ETF
+# ==============================
 ticker = st.selectbox("Select ETF", ["GLD", "SLV"])
 
-df = yf.download(ticker, period="6mo")
+# ==============================
+# FETCH DATA
+# ==============================
+df = yf.download(ticker, period="1d", interval="1m", progress=False)
 
-st.metric("Current Price", f"{df['Close'].iloc[-1]:.2f}")
+if df.empty:
+    st.error("No data available")
+    st.stop()
 
+# ==============================
+# SAFE VALUE EXTRACTION
+# ==============================
+def safe(val):
+    if isinstance(val, pd.Series):
+        val = val.values[0]
+    return float(val)
+
+# ==============================
+# METRICS
+# ==============================
+price = safe(df['Close'].iloc[-1])
+open_p = safe(df['Open'].iloc[0])
+
+change = price - open_p
+pct = (change / open_p) * 100
+
+high = safe(df['High'].max())
+low = safe(df['Low'].min())
+volume = int(safe(df['Volume'].sum()))
+
+# ==============================
+# HEADER STYLE (LIKE GOOGLE UI)
+# ==============================
+st.markdown(f"""
+### {ticker} ETF
+## ${price:.2f}
+<span style='color:{"green" if change>0 else "red"}'>
+{change:+.2f} ({pct:.2f}%) Today
+</span>
+""", unsafe_allow_html=True)
+
+# ==============================
+# TIME FILTER BUTTONS
+# ==============================
+time_range = st.radio("Select Range", ["1D","5D","1M","6M","1Y"], horizontal=True)
+
+# ==============================
+# FETCH DATA BASED ON RANGE
+# ==============================
+range_map = {
+    "1D": ("1d","1m"),
+    "5D": ("5d","5m"),
+    "1M": ("1mo","1h"),
+    "6M": ("6mo","1d"),
+    "1Y": ("1y","1d")
+}
+
+period, interval = range_map[time_range]
+df = yf.download(ticker, period=period, interval=interval, progress=False)
+
+# ==============================
+# CHART (RED STYLE LIKE IMAGE)
+# ==============================
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=df.index, y=df['Close'], fill='tozeroy'))
-fig.update_layout(template="plotly_dark")
+
+fig.add_trace(go.Scatter(
+    x=df.index,
+    y=df['Close'],
+    fill='tozeroy',
+    line=dict(color='red'),
+    name="Price"
+))
+
+fig.update_layout(
+    template="plotly_dark",
+    height=400,
+    showlegend=False,
+    margin=dict(l=0,r=0,t=0,b=0)
+)
 
 st.plotly_chart(fig, use_container_width=True)
 
 # ==============================
-# SIMPLE MODEL
+# INFO GRID (LIKE IMAGE)
 # ==============================
-def normalize(df):
-    for col in df.columns:
-        df[col] = (df[col] - df[col].rolling(60).mean()) / df[col].rolling(60).std()
-    return df.dropna()
+col1, col2 = st.columns(2)
 
-def sequences(df):
-    X = []
-    for i in range(len(df)-8):
-        X.append(df.iloc[i:i+8].values)
-    return np.array(X)
+with col1:
+    st.write(f"Open: {open_p:.2f}")
+    st.write(f"Day High: {high:.2f}")
+    st.write(f"Year Low: {safe(df['Low'].min()):.2f}")
 
-norm = normalize(df[['Open','High','Low','Close','Volume']])
-
-if len(norm) > 70:
-    X = sequences(norm)
-
-    if len(X) > 0:
-        X_tensor = torch.tensor(X, dtype=torch.float32)
-
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(5, 32, batch_first=True)
-                self.fc = torch.nn.Linear(32,1)
-
-            def forward(self,x):
-                _,(h,_) = self.lstm(x)
-                return self.fc(h[-1])
-
-        model = Model()
-        model.eval()
-
-        with torch.no_grad():
-            pred = model(X_tensor)
-
-        z = pred[-1].item()
-        trend = "UP" if z > 0 else "DOWN"
-
-        st.metric("Predicted Trend", trend)
-        st.metric("Z-score", round(z,4))
+with col2:
+    st.write(f"Volume: {volume:,}")
+    st.write(f"Day Low: {low:.2f}")
+    st.write(f"Year High: {safe(df['High'].max()):.2f}")
