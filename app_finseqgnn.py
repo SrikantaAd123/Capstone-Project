@@ -4,9 +4,10 @@ import pandas as pd
 import yfinance as yf
 import numpy as np
 import torch
+import torch.nn as nn
 
 ##########################################################
-# PART 1: DATA FETCH + PREPROCESSING (YOUR COLAB LOGIC)
+# PART 1: DATA FETCH + PREPROCESSING
 ##########################################################
 
 def fetch_data(ticker, period="6mo"):
@@ -26,14 +27,14 @@ def create_sequences(df, seq_len=8):
     return np.array(X)
 
 ##########################################################
-# PART 2: MODEL (LSTM BASELINE FROM YOUR COLAB)
+# PART 2: MODEL
 ##########################################################
 
-class PriceLSTM(torch.nn.Module):
+class PriceLSTM(nn.Module):
     def __init__(self):
         super().__init__()
-        self.lstm = torch.nn.LSTM(5, 64, batch_first=True)
-        self.fc = torch.nn.Linear(64, 1)
+        self.lstm = nn.LSTM(5, 64, batch_first=True)
+        self.fc = nn.Linear(64, 1)
 
     def forward(self, x):
         _, (h, _) = self.lstm(x)
@@ -42,21 +43,25 @@ class PriceLSTM(torch.nn.Module):
 def predict_model(X):
     model = PriceLSTM()
     model.eval()
+
+    if X.dim() != 3:
+        raise ValueError(f"LSTM expects 3D input, got {X.dim()}D")
+
     with torch.no_grad():
         preds = model(X)
+
     return preds
 
 ##########################################################
-# PART 3: STREAMLIT DASHBOARD
+# PART 3: STREAMLIT UI
 ##########################################################
 
 st.set_page_config(layout="wide")
-st.title("📊 FINseqGNN Stock Prediction Dashboard")
+st.title(" FINseqGNN Stock Prediction Dashboard")
 
-# Sidebar
 st.sidebar.header("Parameters")
 ticker = st.sidebar.selectbox("Select Stock", ["AAPL", "GOOG", "ABBV"])
-period = st.sidebar.selectbox("Period", ["1mo","3mo","6mo","1y"])
+period = st.sidebar.selectbox("Period", ["1mo", "3mo", "6mo", "1y"])
 
 ##########################################################
 # MAIN EXECUTION
@@ -64,36 +69,60 @@ period = st.sidebar.selectbox("Period", ["1mo","3mo","6mo","1y"])
 
 if st.sidebar.button("Run Prediction"):
 
-    # Fetch + preprocess
-    data = fetch_data(ticker, period)
-    data = zscore_normalize(data)
+    try:
+        # Step 1: Fetch data
+        data = fetch_data(ticker, period)
 
-    # Create sequences
-    X = create_sequences(data)
-    X_tensor = torch.tensor(X).float()
+        # Step 2: Normalize
+        data = zscore_normalize(data)
 
-    # Predict
-    preds = predict_model(X_tensor)
-    latest_pred = preds[-1].item()
+        # Step 3: Check data
+        if len(data) < 70:
+            st.error("Not enough data after normalization. Choose larger period.")
+            st.stop()
 
-    # Trend
-    trend = "📈 UPTREND" if latest_pred > 0 else "📉 DOWNTREND"
+        # Step 4: Create sequences
+        X = create_sequences(data)
 
-    ##########################################################
-    # UI OUTPUT
-    ##########################################################
+        if len(X) == 0:
+            st.error("Sequence creation failed. Not enough data.")
+            st.stop()
 
-    col1, col2 = st.columns(2)
+        # Step 5: Convert to tensor
+        X_tensor = torch.tensor(X, dtype=torch.float32)
 
-    with col1:
-        st.metric("Predicted Trend", trend)
-        st.metric("Z-score", round(latest_pred, 4))
+        # Step 6: Ensure 3D shape
+        if X_tensor.dim() == 2:
+            X_tensor = X_tensor.unsqueeze(0)
 
-    with col2:
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(y=data['Close'], name="Close Price"))
-        fig.update_layout(title=f"{ticker} Price Chart")
-        st.plotly_chart(fig)
+        # Debug (optional)
+        st.write("Input Shape:", X_tensor.shape)
 
-    st.subheader("Recent Data")
-    st.dataframe(data.tail())
+        # Step 7: Predict
+        preds = predict_model(X_tensor)
+        latest_pred = preds[-1].item()
+
+        # Step 8: Trend
+        trend = "📈 UPTREND" if latest_pred > 0 else "📉 DOWNTREND"
+
+        ##########################################################
+        # OUTPUT UI
+        ##########################################################
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("Predicted Trend", trend)
+            st.metric("Z-score Prediction", round(latest_pred, 4))
+
+        with col2:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(y=data['Close'], name="Close Price"))
+            fig.update_layout(title=f"{ticker} Price Chart")
+            st.plotly_chart(fig)
+
+        st.subheader("Recent Data")
+        st.dataframe(data.tail())
+
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
