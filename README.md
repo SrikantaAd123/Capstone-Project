@@ -1,40 +1,16 @@
-# 📈 Stock Price Prediction using FINseqGNN
+# FINseqGNN Stock Prediction
 
-##  Overview
-This project presents a multimodal deep learning framework that combines:
-- Numerical stock price data
-- Financial tweet sentiment
-- Graph Neural Networks
+## Overview
+Multimodal stock prediction using LSTM and Graph Neural Networks.
 
-to predict stock price z-scores and market trends.
+## Features
+- Z-score prediction
+- LSTM model
+- ETF + Stock dashboard
+- Streamlit UI
 
----
+## Run
 
-##  Features
-- Z-score normalization (ACL-2018 standard)
-- 8-day temporal modeling
-- Sentiment integration (FLAIR)
-- LSTM + GNN architecture
-- Trading metrics (Sharpe, MRR, CEQ)
-- Streamlit deployment
+pip install -r requirements.txt
 
----
-
-## Models Implemented
-- LSTM
-- ALSTM
-- GCN
-- GAT
-- Transformer
-- FINseqGNN (Proposed)
-
----
-
-
-
----
-
-## 🖥️ Run App
-
-```bash
-streamlit run app/app.py
+streamlit run app_finseqgnn.py
