@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-st.title("📊 Real Time Stock Dashboard (DeepCharts Style)")
+st.title("📊 Real Time Stock Dashboard + (Z-Score Prediction)")
 
 # ==============================
 # SAFE VALUE
