@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-st.title("📊 Real Time Stock Dashboard + (Z-Score Prediction)")
+st.title("📊 Smart Stock Dashboard (AI + Indicators)")
 
 # ==============================
 # SAFE VALUE
@@ -16,7 +16,7 @@ def safe(val):
     return float(val)
 
 # ==============================
-# FETCH DATA (ROBUST)
+# FETCH DATA
 # ==============================
 def fetch(ticker, period):
     df = yf.download(ticker, period=period, interval="1d", progress=False)
@@ -33,7 +33,6 @@ def fetch(ticker, period):
         df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
 
     df['Date'] = pd.to_datetime(df['Date'])
-
     df = df[['Date','Open','High','Low','Close','Volume']]
     df = df.dropna()
 
@@ -59,32 +58,96 @@ def compute_zscore(df):
 # TREND
 # ==============================
 def get_trend(df):
-    if df['Close'].iloc[-1] > df['Close'].iloc[-5]:
-        return "📈 UPTREND"
+    latest = df.iloc[-1]
+
+    if latest['Close'] > latest['SMA20'] and latest['EMA20'] > latest['SMA20']:
+        return "📈 STRONG UPTREND"
+    elif latest['Close'] < latest['SMA20'] and latest['EMA20'] < latest['SMA20']:
+        return "📉 STRONG DOWNTREND"
     else:
-        return "📉 DOWNTREND"
+        return "⚠ SIDEWAYS"
 
 # ==============================
-# SIDEBAR INPUTS
+# FINAL PREDICTION
 # ==============================
-st.sidebar.header("Chart Parameters")
+def final_prediction(df, z_val):
+    latest = df.iloc[-1]
+    score = 0
 
-ticker = st.sidebar.text_input("Ticker", "AAPL")
+    if latest['Close'] > latest['SMA20']:
+        score += 1
+    else:
+        score -= 1
 
-period = st.sidebar.selectbox(
-    "Time Period",
-    ["3mo","6mo","1y","2y"]
-)
+    if latest['EMA20'] > latest['SMA20']:
+        score += 1
+    else:
+        score -= 1
 
-chart_type = st.sidebar.selectbox(
-    "Chart Type",
-    ["Candlestick","Line"]
-)
+    if z_val < -1:
+        score += 1
+    elif z_val > 1:
+        score -= 1
+
+    if score >= 2:
+        return "🚀 STRONG BUY"
+    elif score == 1:
+        return "📈 BUY"
+    elif score == 0:
+        return "😐 HOLD"
+    elif score == -1:
+        return "📉 SELL"
+    else:
+        return "💀 STRONG SELL"
+
+# ==============================
+# REAL-TIME PRICE (FIXED)
+# ==============================
+@st.cache_data(ttl=60)
+def get_price(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+
+        # Try real-time (1m)
+        df = stock.history(period="1d", interval="1m")
+
+        # Fallback if market closed
+        if df.empty:
+            df = stock.history(period="5d")
+
+        if not df.empty:
+            price = float(df['Close'].iloc[-1])
+
+            if len(df) > 1:
+                prev = float(df['Close'].iloc[-2])
+            else:
+                prev = price
+
+            change = price - prev
+            pct = (change / prev) * 100 if prev != 0 else 0
+
+            return round(price, 2), round(change, 2), round(pct, 2)
+
+    except:
+        return None, None, None
+
+    return None, None, None
+
+# ==============================
+# SIDEBAR
+# ==============================
+st.sidebar.header("⚙ Parameters")
+
+tickers = st.sidebar.text_input("Tickers (comma-separated)", "AAPL,GOOG,AMZN")
+ticker_list = [t.strip().upper() for t in tickers.split(",")]
+
+period = st.sidebar.selectbox("Time Period", ["3mo","6mo","1y","2y"])
+chart_type = st.sidebar.selectbox("Chart Type", ["Candlestick","Line"])
 
 indicators = st.sidebar.multiselect(
-    "Technical Indicators",
+    "Indicators",
     ["SMA20","EMA20"],
-    default=["SMA20"]
+    default=["SMA20","EMA20"]
 )
 
 run = st.sidebar.button("Update")
@@ -94,151 +157,124 @@ run = st.sidebar.button("Update")
 # ==============================
 if run:
 
-    df = fetch(ticker, period)
+    for ticker in ticker_list:
 
-    if df.empty:
-        st.error("Invalid ticker or no data")
-        st.stop()
+        st.markdown("---")
+        st.header(f"📊 {ticker}")
 
-    df = add_indicators(df)
+        df = fetch(ticker, period)
 
-    # ==============================
-    # METRICS
-    # ==============================
-    price = safe(df['Close'].iloc[-1])
-    prev = safe(df['Close'].iloc[-2])
+        if df.empty:
+            st.warning(f"{ticker} data not found")
+            continue
 
-    change = price - prev
-    pct = (change / prev) * 100 if prev != 0 else 0
+        df = add_indicators(df)
+        zdf = compute_zscore(df)
 
-    high = safe(df['High'].max())
-    low = safe(df['Low'].min())
-    volume = int(safe(df['Volume'].iloc[-1]))
+        price = safe(df['Close'].iloc[-1])
+        prev = safe(df['Close'].iloc[-2])
 
-    trend = get_trend(df)
+        change = price - prev
+        pct = (change / prev) * 100 if prev != 0 else 0
 
-    # ==============================
-    # Z-SCORE
-    # ==============================
-    zdf = compute_zscore(df)
+        high = safe(df['High'].max())
+        low = safe(df['Low'].min())
+        volume = int(safe(df['Volume'].iloc[-1]))
 
-    z_val = float(zdf['Z'].iloc[-1]) if len(zdf) > 0 else 0
-    z_trend = "📈 Bullish" if z_val > 0 else "📉 Bearish"
+        trend = get_trend(df)
 
-    # ==============================
-    # DISPLAY METRICS
-    # ==============================
-    c1,c2,c3,c4,c5 = st.columns(5)
+        z_val = float(zdf['Z'].iloc[-1]) if len(zdf) > 0 else 0
 
-    c1.metric("Price", f"{price:.2f} USD", f"{change:+.2f} ({pct:.2f}%)")
-    c2.metric("High", f"{high:.2f}")
-    c3.metric("Low", f"{low:.2f}")
-    c4.metric("Volume", f"{volume:,}")
-    c5.metric("Z-score", f"{z_val:.3f}", z_trend)
+        # Z-score signal
+        if z_val > 1:
+            z_signal = "⚠ Overbought"
+        elif z_val < -1:
+            z_signal = "🔥 Oversold"
+        else:
+            z_signal = "😐 Neutral"
 
-    st.subheader(trend)
+        signal = final_prediction(df, z_val)
 
-    # ==============================
-    # CHART
-    # ==============================
-    fig = go.Figure()
+        # ==============================
+        # METRICS
+        # ==============================
+        c1,c2,c3,c4,c5 = st.columns(5)
 
-    if chart_type == "Candlestick":
-        fig.add_trace(go.Candlestick(
-            x=df['Date'],
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close'],
-            increasing_line_color='#22c55e',
-            decreasing_line_color='#ef4444'
-        ))
-    else:
-        fig.add_trace(go.Scatter(
-            x=df['Date'],
-            y=df['Close'],
-            mode='lines',
-            line=dict(color='cyan', width=2)
-        ))
+        c1.metric("Price", f"{price:.2f} USD", f"{change:+.2f} ({pct:.2f}%)")
+        c2.metric("High", f"{high:.2f}")
+        c3.metric("Low", f"{low:.2f}")
+        c4.metric("Volume", f"{volume:,}")
+        c5.metric("Z-score", f"{z_val:.3f}", z_signal)
 
-    if "SMA20" in indicators:
-        fig.add_trace(go.Scatter(
-            x=df['Date'],
-            y=df['SMA20'],
-            line=dict(color='yellow', width=2),
-            name="SMA20"
-        ))
+        st.subheader(trend)
+        st.subheader(f"📊 FINAL SIGNAL: {signal}")
 
-    if "EMA20" in indicators:
-        fig.add_trace(go.Scatter(
-            x=df['Date'],
-            y=df['EMA20'],
-            line=dict(color='orange', width=2),
-            name="EMA20"
-        ))
+        # ==============================
+        # CHART
+        # ==============================
+        fig = go.Figure()
 
-    fig.update_layout(
-        template="plotly_dark",
-        height=550,
-        margin=dict(l=10,r=10,t=30,b=10)
-    )
+        if chart_type == "Candlestick":
+            fig.add_trace(go.Candlestick(
+                x=df['Date'],
+                open=df['Open'],
+                high=df['High'],
+                low=df['Low'],
+                close=df['Close']
+            ))
+        else:
+            fig.add_trace(go.Scatter(
+                x=df['Date'],
+                y=df['Close'],
+                mode='lines'
+            ))
 
-    st.plotly_chart(fig, use_container_width=True)
+        if "SMA20" in indicators:
+            fig.add_trace(go.Scatter(
+                x=df['Date'],
+                y=df['SMA20'],
+                name="SMA20"
+            ))
 
-    # ==============================
-    # Z-SCORE GRAPH
-    # ==============================
-    st.subheader("Z-Score Trend")
+        if "EMA20" in indicators:
+            fig.add_trace(go.Scatter(
+                x=df['Date'],
+                y=df['EMA20'],
+                name="EMA20"
+            ))
 
-    if len(zdf) > 0:
-        fig_z = go.Figure()
+        fig.update_layout(template="plotly_dark", height=500)
+        st.plotly_chart(fig, use_container_width=True)
 
-        fig_z.add_trace(go.Scatter(
-            x=zdf['Date'],
-            y=zdf['Z'],
-            line=dict(color='orange', width=2)
-        ))
+        # ==============================
+        # Z-SCORE GRAPH
+        # ==============================
+        st.subheader("Z-Score Trend")
 
-        fig_z.update_layout(
-            template="plotly_dark",
-            height=300
-        )
-
-        st.plotly_chart(fig_z, use_container_width=True)
+        if len(zdf) > 0:
+            fig_z = go.Figure()
+            fig_z.add_trace(go.Scatter(
+                x=zdf['Date'],
+                y=zdf['Z']
+            ))
+            fig_z.update_layout(template="plotly_dark", height=300)
+            st.plotly_chart(fig_z, use_container_width=True)
 
 # ==============================
-# FAST SIDEBAR (FIXED)
+# SIDEBAR LIVE PRICES (FIXED)
 # ==============================
-st.sidebar.subheader("📊 Real-Time Prices")
+st.sidebar.subheader("📊 Live Prices")
 
-@st.cache_data(ttl=60)
-def get_price(ticker):
-    try:
-        df = yf.download(ticker, period="1d", interval="5m", progress=False)
-
-        if not df.empty:
-            price = float(df['Close'].iloc[-1])
-            prev = float(df['Close'].iloc[-2]) if len(df) > 1 else price
-
-            change = price - prev
-            pct = (change / prev) * 100 if prev != 0 else 0
-
-            return price, change, pct
-
-    except:
-        return None, None, None
-
-    return None, None, None
-
-
-for s in ["AAPL","GOOG","AMZN"]:
+for s in ticker_list:
     price, change, pct = get_price(s)
 
     if price is not None:
+        arrow = "🔼" if change >= 0 else "🔽"
+
         st.sidebar.metric(
-            s,
-            f"{price:.2f} USD",
-            f"{change:+.2f} ({pct:.2f}%)"
+            label=s,
+            value=f"{price} USD",
+            delta=f"{arrow} {change} ({pct}%)"
         )
     else:
-        st.sidebar.metric(s, "Loading...", "")
+        st.sidebar.metric(s, "Fetching...", "")
