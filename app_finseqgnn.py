@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -279,4 +278,3 @@ for s in ticker_list:
         )
     else:
         st.sidebar.metric(s, "Fetching...", "")
-```
