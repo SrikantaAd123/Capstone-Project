@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-st.title("📊 Stock Prediction Dashboard (Smart Indicators + Z-Score)")
+st.title("Stock Prediction Dashboard (Smart Indicators + Z-Score)")
 
 # ==============================
 # SAFE VALUE
@@ -279,4 +279,3 @@ for s in ticker_list:
         )
     else:
         st.sidebar.metric(s, "Fetching...", "")
-```
