@@ -5,7 +5,8 @@ import pandas as pd
 import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
-st.title("📊 ETF Dashboard (Gold & Silver + Smart Signals)")
+
+st.title("📊 Stock Prediction Dashboard (Smart Indicators + Z-Score)")
 
 # ==============================
 # SAFE VALUE
@@ -18,8 +19,8 @@ def safe(val):
 # ==============================
 # FETCH DATA
 # ==============================
-def fetch(ticker, period, interval):
-    df = yf.download(ticker, period=period, interval=interval, progress=False)
+def fetch(ticker, period):
+    df = yf.download(ticker, period=period, interval="1d", progress=False)
 
     if df.empty:
         return df
@@ -68,9 +69,9 @@ def get_trend(df):
         return "⚠ SIDEWAYS", "🟡 NEUTRAL"
 
 # ==============================
-# FINAL SMART SIGNAL
+# FINAL SMART PREDICTION
 # ==============================
-def final_signal(df, z_val):
+def final_prediction(df, z_val):
     latest = df.iloc[-1]
 
     score = 0
@@ -86,7 +87,7 @@ def final_signal(df, z_val):
     else:
         score -= 2
 
-    # Z-score filter (IMPORTANT)
+    # Z-score filter
     if z_val < -1:
         score += 2
     elif z_val > 1.5:
@@ -98,140 +99,184 @@ def final_signal(df, z_val):
     elif score >= 2:
         return "📈 BUY (Bullish)"
     elif score >= 0:
-        return "😐 HOLD (Neutral)"
+        return "😐 HOLD (Neutral Zone)"
     elif score >= -2:
         return "📉 SELL (Bearish)"
     else:
         return "💀 STRONG SELL (Overbought + Bearish)"
 
 # ==============================
-# UI
+# REAL-TIME PRICE
 # ==============================
-ticker = st.selectbox("Select ETF", ["GLD", "SLV"])
+@st.cache_data(ttl=60)
+def get_price(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="1d", interval="1m")
 
-range_map = {
-    "1D": ("1d","1m"),
-    "5D": ("5d","5m"),
-    "1M": ("1mo","1h"),
-    "6M": ("6mo","1d"),
-    "1Y": ("1y","1d"),
-    "MAX": ("max","1d")
-}
+        if df.empty:
+            df = stock.history(period="5d")
 
-time_range = st.radio("Range", list(range_map.keys()), horizontal=True)
+        if not df.empty:
+            price = float(df['Close'].iloc[-1])
+            prev = float(df['Close'].iloc[-2]) if len(df) > 1 else price
 
-period, interval = range_map[time_range]
+            change = price - prev
+            pct = (change / prev) * 100 if prev != 0 else 0
 
-df = fetch(ticker, period, interval)
+            return round(price, 2), round(change, 2), round(pct, 2)
+    except:
+        return None, None, None
 
-if df.empty:
-    st.error("No data available")
-    st.stop()
-
-# ==============================
-# ADD INDICATORS
-# ==============================
-df = add_indicators(df)
+    return None, None, None
 
 # ==============================
-# PRICE LOGIC
+# SIDEBAR
 # ==============================
-price = safe(df['Close'].iloc[-1])
-prev = safe(df['Close'].iloc[-2]) if len(df) > 1 else price
+st.sidebar.header("⚙ Parameters")
 
-change = price - prev
-pct = (change / prev) * 100 if prev != 0 else 0
+tickers = st.sidebar.text_input("Tickers", "AAPL,GOOG,AMZN")
+ticker_list = [t.strip().upper() for t in tickers.split(",")]
 
-high = safe(df['High'].max())
-low = safe(df['Low'].min())
-volume = int(df['Volume'].sum())
+period = st.sidebar.selectbox("Time Period", ["3mo","6mo","1y","2y"])
+chart_type = st.sidebar.selectbox("Chart Type", ["Candlestick","Line"])
 
-trend, market_type = get_trend(df)
-
-# ==============================
-# Z-SCORE
-# ==============================
-zdf = compute_zscore(df)
-z_val = float(zdf['Z'].iloc[-1]) if len(zdf) > 0 else 0
-
-# Improved Z-score interpretation
-if z_val > 2:
-    z_signal = "🚨 Strong Overbought"
-elif z_val > 1:
-    z_signal = "⚠ Overbought"
-elif z_val < -2:
-    z_signal = "💎 Strong Oversold"
-elif z_val < -1:
-    z_signal = "🔥 Oversold"
-else:
-    z_signal = "😐 Neutral"
-
-# ==============================
-# FINAL SIGNAL
-# ==============================
-signal = final_signal(df, z_val)
-
-# ==============================
-# HEADER
-# ==============================
-st.markdown(f"""
-### {ticker}
-## ${price:.2f}
-<span style='color:{"green" if change>0 else "red"}'>
-{change:+.2f} ({pct:.2f}%)
-</span>
-""", unsafe_allow_html=True)
-
-st.subheader(f"{trend} | Market: {market_type}")
-st.subheader(f"📊 FINAL SIGNAL: {signal}")
-
-# ==============================
-# MAIN CHART
-# ==============================
-fig = go.Figure()
-
-fig.add_trace(go.Scatter(
-    x=df['Date'],
-    y=df['Close'],
-    mode='lines',
-    fill='tozeroy',
-    line=dict(width=2)
-))
-
-fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA20'], name="SMA20"))
-fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA20'], name="EMA20"))
-
-fig.update_layout(
-    template="plotly_dark",
-    height=420,
-    margin=dict(l=0,r=0,t=10,b=0)
+indicators = st.sidebar.multiselect(
+    "Indicators",
+    ["SMA20","EMA20"],
+    default=["SMA20","EMA20"]
 )
 
-st.plotly_chart(fig, use_container_width=True)
+run = st.sidebar.button("Update")
 
 # ==============================
-# METRICS
+# MAIN
 # ==============================
-c1, c2, c3, c4 = st.columns(4)
+if run:
 
-c1.metric("High", f"{high:.2f}")
-c2.metric("Low", f"{low:.2f}")
-c3.metric("Volume", f"{volume:,}")
-c4.metric("Z-score", f"{z_val:.3f}", z_signal)
+    for ticker in ticker_list:
+
+        st.markdown("---")
+        st.header(f"📊 {ticker}")
+
+        df = fetch(ticker, period)
+
+        if df.empty:
+            st.warning(f"{ticker} data not found")
+            continue
+
+        df = add_indicators(df)
+        zdf = compute_zscore(df)
+
+        price = safe(df['Close'].iloc[-1])
+        prev = safe(df['Close'].iloc[-2])
+
+        change = price - prev
+        pct = (change / prev) * 100 if prev != 0 else 0
+
+        high = safe(df['High'].max())
+        low = safe(df['Low'].min())
+        volume = int(safe(df['Volume'].iloc[-1]))
+
+        trend, market_type = get_trend(df)
+
+        z_val = float(zdf['Z'].iloc[-1]) if len(zdf) > 0 else 0
+
+        # Z-score label
+        if z_val > 2:
+            z_signal = "🚨 Strong Overbought"
+        elif z_val > 1:
+            z_signal = "⚠ Overbought"
+        elif z_val < -2:
+            z_signal = "💎 Strong Oversold"
+        elif z_val < -1:
+            z_signal = "🔥 Oversold"
+        else:
+            z_signal = "😐 Neutral"
+
+        signal = final_prediction(df, z_val)
+
+        # ==============================
+        # METRICS
+        # ==============================
+        c1,c2,c3,c4,c5 = st.columns(5)
+
+        c1.metric("Price", f"{price:.2f} USD", f"{change:+.2f} ({pct:.2f}%)")
+        c2.metric("High", f"{high:.2f}")
+        c3.metric("Low", f"{low:.2f}")
+        c4.metric("Volume", f"{volume:,}")
+        c5.metric("Z-score", f"{z_val:.3f}", z_signal)
+
+        st.subheader(f"{trend} | Market: {market_type}")
+        st.subheader(f"📊 FINAL SIGNAL: {signal}")
+
+        # ==============================
+        # CHART
+        # ==============================
+        fig = go.Figure()
+
+        if chart_type == "Candlestick":
+            fig.add_trace(go.Candlestick(
+                x=df['Date'],
+                open=df['Open'],
+                high=df['High'],
+                low=df['Low'],
+                close=df['Close']
+            ))
+        else:
+            fig.add_trace(go.Scatter(
+                x=df['Date'],
+                y=df['Close'],
+                mode='lines'
+            ))
+
+        if "SMA20" in indicators:
+            fig.add_trace(go.Scatter(
+                x=df['Date'],
+                y=df['SMA20'],
+                name="SMA20"
+            ))
+
+        if "EMA20" in indicators:
+            fig.add_trace(go.Scatter(
+                x=df['Date'],
+                y=df['EMA20'],
+                name="EMA20"
+            ))
+
+        fig.update_layout(template="plotly_dark", height=500)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ==============================
+        # Z-SCORE GRAPH
+        # ==============================
+        st.subheader("Z-Score Trend")
+
+        if len(zdf) > 0:
+            fig_z = go.Figure()
+            fig_z.add_trace(go.Scatter(
+                x=zdf['Date'],
+                y=zdf['Z']
+            ))
+            fig_z.update_layout(template="plotly_dark", height=300)
+            st.plotly_chart(fig_z, use_container_width=True)
 
 # ==============================
-# Z-SCORE GRAPH
+# LIVE PRICES
 # ==============================
-st.subheader("Z-Score Trend")
+st.sidebar.subheader("📊 Live Prices")
 
-if len(zdf) > 0:
-    fig_z = go.Figure()
-    fig_z.add_trace(go.Scatter(
-        x=zdf['Date'],
-        y=zdf['Z']
-    ))
-    fig_z.update_layout(template="plotly_dark", height=300)
-    st.plotly_chart(fig_z, use_container_width=True)
-else:
-    st.info("Not enough data")
+for s in ticker_list:
+    price, change, pct = get_price(s)
+
+    if price is not None:
+        arrow = "🔼" if change >= 0 else "🔽"
+
+        st.sidebar.metric(
+            label=s,
+            value=f"{price} USD",
+            delta=f"{arrow} {change} ({pct}%)"
+        )
+    else:
+        st.sidebar.metric(s, "Fetching...", "")
 ```
