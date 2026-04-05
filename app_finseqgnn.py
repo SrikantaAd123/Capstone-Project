@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -5,7 +6,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-st.title("📊 Stock Prdcition Dashboard   (Indicators) + (Z-SCORE)")
+st.title("📊 Stock Prediction Dashboard (Smart Indicators + Z-Score)")
 
 # ==============================
 # SAFE VALUE
@@ -55,79 +56,75 @@ def compute_zscore(df):
     return df.dropna()
 
 # ==============================
-# TREND
+# TREND + MARKET TYPE
 # ==============================
 def get_trend(df):
     latest = df.iloc[-1]
 
     if latest['Close'] > latest['SMA20'] and latest['EMA20'] > latest['SMA20']:
-        return "📈 STRONG UPTREND"
+        return "📈 STRONG UPTREND", "🟢 BULLISH"
     elif latest['Close'] < latest['SMA20'] and latest['EMA20'] < latest['SMA20']:
-        return "📉 STRONG DOWNTREND"
+        return "📉 STRONG DOWNTREND", "🔴 BEARISH"
     else:
-        return "⚠ SIDEWAYS"
+        return "⚠ SIDEWAYS", "🟡 NEUTRAL"
 
 # ==============================
-# FINAL PREDICTION
+# FINAL SMART PREDICTION
 # ==============================
 def final_prediction(df, z_val):
     latest = df.iloc[-1]
+
     score = 0
 
+    # Trend strength
     if latest['Close'] > latest['SMA20']:
-        score += 1
+        score += 2
     else:
-        score -= 1
+        score -= 2
 
     if latest['EMA20'] > latest['SMA20']:
-        score += 1
+        score += 2
     else:
-        score -= 1
+        score -= 2
 
+    # Z-score filter
     if z_val < -1:
-        score += 1
-    elif z_val > 1:
-        score -= 1
+        score += 2
+    elif z_val > 1.5:
+        score -= 3
 
-    if score >= 2:
-        return "🚀 STRONG BUY"
-    elif score == 1:
-        return "📈 BUY"
-    elif score == 0:
-        return "😐 HOLD"
-    elif score == -1:
-        return "📉 SELL"
+    # Decision
+    if score >= 4:
+        return "🚀 STRONG BUY (Bullish + Undervalued)"
+    elif score >= 2:
+        return "📈 BUY (Bullish)"
+    elif score >= 0:
+        return "😐 HOLD (Neutral Zone)"
+    elif score >= -2:
+        return "📉 SELL (Bearish)"
     else:
-        return "💀 STRONG SELL"
+        return "💀 STRONG SELL (Overbought + Bearish)"
 
 # ==============================
-# REAL-TIME PRICE (FIXED)
+# REAL-TIME PRICE
 # ==============================
 @st.cache_data(ttl=60)
 def get_price(ticker):
     try:
         stock = yf.Ticker(ticker)
-
-        # Try real-time (1m)
         df = stock.history(period="1d", interval="1m")
 
-        # Fallback if market closed
         if df.empty:
             df = stock.history(period="5d")
 
         if not df.empty:
             price = float(df['Close'].iloc[-1])
-
-            if len(df) > 1:
-                prev = float(df['Close'].iloc[-2])
-            else:
-                prev = price
+            prev = float(df['Close'].iloc[-2]) if len(df) > 1 else price
 
             change = price - prev
             pct = (change / prev) * 100 if prev != 0 else 0
 
             return round(price, 2), round(change, 2), round(pct, 2)
-
     except:
         return None, None, None
 
@@ -138,7 +135,7 @@ def get_price(ticker):
 # ==============================
 st.sidebar.header("⚙ Parameters")
 
-tickers = st.sidebar.text_input("Tickers (comma-separated)", "AAPL,GOOG,AMZN")
+tickers = st.sidebar.text_input("Tickers", "AAPL,GOOG,AMZN")
 ticker_list = [t.strip().upper() for t in tickers.split(",")]
 
 period = st.sidebar.selectbox("Time Period", ["3mo","6mo","1y","2y"])
@@ -181,13 +178,17 @@ if run:
         low = safe(df['Low'].min())
         volume = int(safe(df['Volume'].iloc[-1]))
 
-        trend = get_trend(df)
+        trend, market_type = get_trend(df)
 
         z_val = float(zdf['Z'].iloc[-1]) if len(zdf) > 0 else 0
 
-        # Z-score signal
-        if z_val > 1:
+        # Z-score label
+        if z_val > 2:
+            z_signal = "🚨 Strong Overbought"
+        elif z_val > 1:
             z_signal = "⚠ Overbought"
+        elif z_val < -2:
+            z_signal = "💎 Strong Oversold"
         elif z_val < -1:
             z_signal = "🔥 Oversold"
         else:
@@ -206,7 +207,7 @@ if run:
         c4.metric("Volume", f"{volume:,}")
         c5.metric("Z-score", f"{z_val:.3f}", z_signal)
 
-        st.subheader(trend)
+        st.subheader(f"{trend} | Market: {market_type}")
         st.subheader(f"📊 FINAL SIGNAL: {signal}")
 
         # ==============================
@@ -261,7 +262,7 @@ if run:
             st.plotly_chart(fig_z, use_container_width=True)
 
 # ==============================
-# SIDEBAR LIVE PRICES (FIXED)
+# LIVE PRICES
 # ==============================
 st.sidebar.subheader("📊 Live Prices")
 
@@ -278,3 +279,4 @@ for s in ticker_list:
         )
     else:
         st.sidebar.metric(s, "Fetching...", "")
+```
