@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-st.title("📊 Smart Stock Dashboard (AI + Indicators)")
+st.title("📊 Stock Prdcition Dashboard   (Indicators) + (Z-SCORE)")
 
 # ==============================
 # SAFE VALUE
