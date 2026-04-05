@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -234,4 +234,4 @@ if len(zdf) > 0:
     st.plotly_chart(fig_z, use_container_width=True)
 else:
     st.info("Not enough data")
-```
+
