@@ -242,7 +242,17 @@ if run:
                 x=df['Date'],
                 y=df['EMA20'],
                 name="EMA20"
+
+
+ # Future Prediction
+fig.add_trace(go.Scatter(
+    x=future_df['Date'],
+    y=future_df['Predicted'],
+    name="🔮 Future Prediction",
+    line=dict(dash='dash', width=3)    
             ))
+
+        
 
         fig.update_layout(template="plotly_dark", height=500)
         st.plotly_chart(fig, use_container_width=True)
@@ -284,6 +294,8 @@ for s in ticker_list:
 # ==============================
 # FUTURE TABLE
 # ==============================
+
+
 st.subheader("🔮 Future Prediction (Next 10 Days)")
 st.dataframe(future_df)
 
