@@ -280,3 +280,12 @@ for s in ticker_list:
     else:
         st.sidebar.metric(s, "Fetching...", "")
 
+
+# ==============================
+# FUTURE TABLE
+# ==============================
+st.subheader("🔮 Future Prediction (Next 10 Days)")
+st.dataframe(future_df)
+
+
+
